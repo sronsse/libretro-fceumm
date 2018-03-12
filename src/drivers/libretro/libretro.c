@@ -1748,6 +1748,164 @@ static const struct cartridge_db famicom_4p_db_list[] =
 };
 
 extern uint32_t iNESGameCRC32;
+extern X6502 X;
+
+/* For external debuggers */
+extern bool X6502_running;
+extern bool X6502_stepping;
+extern uint8 X6502_RdMem(uint32 A);
+extern void X6502_WrMem(uint32 A, uint8 V);
+
+#define NUM_REGS 6
+struct retro_cpu_reg cpu_regs[NUM_REGS] =
+{
+   { "A", 1 },
+   { "X", 1 },
+   { "Y", 1 },
+   { "PC", 2 },
+   { "S", 1 },
+   { "P", 1 }
+};
+
+unsigned int cpu_get_reg(const char *name)
+{
+   /* Return requested register */
+   if (!strcmp(name, "A"))
+      return X.A;
+   else if (!strcmp(name, "X"))
+      return X.X;
+   else if (!strcmp(name, "Y"))
+      return X.Y;
+   else if (!strcmp(name, "PC"))
+      return X.PC;
+   else if (!strcmp(name, "S"))
+      return X.S;
+   else if (!strcmp(name, "P"))
+      return X.P;
+}
+
+#define MAX_BREAKPOINTS 256
+unsigned int breakpoints[MAX_BREAKPOINTS];
+
+#define MAX_WATCHPOINTS 256
+unsigned int watchpoints[MAX_WATCHPOINTS];
+
+void cpu_set_reg(const char *name, unsigned int value)
+{
+   /* Set requested register */
+   if (!strcmp(name, "A"))
+      X.A = (uint8)value;
+   else if (!strcmp(name, "X"))
+      X.X = (uint8)value;
+   else if (!strcmp(name, "Y"))
+      X.Y = (uint8)value;
+   else if (!strcmp(name, "PC"))
+      X.PC = (uint16)value;
+   else if (!strcmp(name, "S"))
+      X.S = (uint8)value;
+   else if (!strcmp(name, "P"))
+      X.P = (uint8)value;
+}
+
+bool cpu_get_running()
+{
+   /* Return running CPU state */
+   return X6502_running;
+}
+
+void cpu_set_running(bool running)
+{
+   /* Update running flag and reset stepping flag */
+   X6502_running = running;
+   X6502_stepping = false;
+}
+
+void cpu_step()
+{
+   /* Force running flag and set stepping flag */
+   X6502_running = true;
+   X6502_stepping = true;
+}
+
+void cpu_reset()
+{
+   /* Reset CPU */
+   X6502_Reset();
+}
+
+bool cpu_readb(unsigned int addr, uint8_t *b)
+{
+   /* Validate address */
+   if (addr > 0xFFFF)
+      return false;
+
+   /* Read desired address contents */
+   *b = X6502_RdMem(addr);
+   return true;
+}
+
+bool cpu_writeb(unsigned int addr, uint8_t b)
+{
+   /* Validate address */
+   if (addr > 0xFFFF)
+      return false;
+
+   /* Write value to desired address */
+   X6502_WrMem(addr, b);
+   return true;
+}
+
+void cpu_add_bp(unsigned int addr)
+{
+   unsigned int i;
+
+   /* Find empty space in array and add breakpoint */
+   for (i = 0; i < MAX_BREAKPOINTS; i++)
+      if (breakpoints[i] == (unsigned int)-1)
+      {
+         breakpoints[i] = addr;
+         break;
+      }
+}
+
+void cpu_add_wp(unsigned int addr)
+{
+   unsigned int i;
+
+   /* Find empty space in array and add watchpoint */
+   for (i = 0; i < MAX_WATCHPOINTS; i++)
+      if (watchpoints[i] == (unsigned int)-1)
+      {
+         watchpoints[i] = addr;
+         break;
+      }
+}
+
+void cpu_rem_bp(unsigned int addr)
+{
+   unsigned int i;
+
+   /* Find breakpoint in array and remove it */
+   for (i = 0; i < MAX_BREAKPOINTS; i++)
+      if (breakpoints[i] == addr)
+      {
+         breakpoints[i] = (unsigned int)-1;
+         break;
+      }
+}
+
+void cpu_rem_wp(unsigned int addr)
+{
+   unsigned int i;
+
+   /* Find watchpoint in array and remove it */
+   for (i = 0; i < MAX_WATCHPOINTS; i++)
+      if (watchpoints[i] == addr)
+      {
+         watchpoints[i] = (unsigned int)-1;
+         break;
+      }
+}
 
 bool retro_load_game(const struct retro_game_info *game)
 {
@@ -1810,6 +1968,7 @@ bool retro_load_game(const struct retro_game_info *game)
 
    struct retro_memory_descriptor descs[64];
    struct retro_memory_map        mmaps;
+   struct retro_cpu_control       cpu_control;
 
    if (!game)
       return false;
@@ -1907,6 +2066,32 @@ bool retro_load_game(const struct retro_game_info *game)
    mmaps.descriptors = descs;
    mmaps.num_descriptors = i;
    environ_cb(RETRO_ENVIRONMENT_SET_MEMORY_MAPS, &mmaps);
+
+   /* Initialize breakpoints array */
+   for (i = 0; i < MAX_BREAKPOINTS; i++)
+      breakpoints[i] = (unsigned int)-1;
+
+   /* Initialize watchpoints array */
+   for (i = 0; i < MAX_WATCHPOINTS; i++)
+      watchpoints[i] = (unsigned int)-1;
+
+   /* Set CPU control structure */
+   memset(&cpu_control, 0, sizeof(cpu_control));
+   cpu_control.num_regs = NUM_REGS;
+   cpu_control.regs = cpu_regs;
+   cpu_control.get_reg = cpu_get_reg;
+   cpu_control.set_reg = cpu_set_reg;
+   cpu_control.get_running = cpu_get_running;
+   cpu_control.set_running = cpu_set_running;
+   cpu_control.step = cpu_step;
+   cpu_control.reset = cpu_reset;
+   cpu_control.readb = cpu_readb;
+   cpu_control.writeb = cpu_writeb;
+   cpu_control.add_bp = cpu_add_bp;
+   cpu_control.add_wp = cpu_add_wp;
+   cpu_control.rem_bp = cpu_rem_bp;
+   cpu_control.rem_wp = cpu_rem_wp;
+   environ_cb(RETRO_ENVIRONMENT_SET_CPU_CONTROL, &cpu_control);
 
    return true;
 }

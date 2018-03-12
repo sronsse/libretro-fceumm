@@ -19,6 +19,7 @@
  */
 
 #include <string.h>
+#include <stdbool.h>
 
 #include "fceu.h"
 #include "fceu-types.h"
@@ -27,6 +28,16 @@
 #include "sound.h"
 
 X6502 X;
+
+/* Used for external execution control */
+bool X6502_running = true;
+bool X6502_stepping = false;
+
+/* Breakpoints/watchpoints handling */
+#define MAX_BREAKPOINTS 256
+#define MAX_WATCHPOINTS 256
+extern unsigned int breakpoints[MAX_BREAKPOINTS];
+extern unsigned int watchpoints[MAX_WATCHPOINTS];
 
 #ifdef FCEUDEF_DEBUGGER
 void (*X6502_Run)(int32 cycles);
@@ -58,11 +69,33 @@ void FP_FASTAPASS(1) (*MapIRQHook)(int a);
 }
 
 static INLINE uint8 RdMemNorm(uint32 A) {
+	unsigned int i;
+
+	/* Stop running on watchpoint hit */
+	for (i = 0; i < MAX_WATCHPOINTS; i++)
+		if (_PC == watchpoints[i])
+			X6502_running = false;
+
 	return(_DB = ARead[A](A));
 }
 
 static INLINE void WrMemNorm(uint32 A, uint8 V) {
+	unsigned int i;
+
+	/* Stop running on watchpoint hit */
+	for (i = 0; i < MAX_WATCHPOINTS; i++)
+		if (_PC == watchpoints[i])
+			X6502_running = false;
+
 	BWrite[A](A, V);
+}
+
+uint8 X6502_RdMem(uint32 A) {
+	return RdMemNorm(A);
+}
+
+void X6502_WrMem(uint32 A, uint8 V) {
+	WrMemNorm(A, V);
 }
 
 #ifdef FCEUDEF_DEBUGGER
@@ -434,7 +467,7 @@ static void X6502_RunDebug(int32 cycles) {
 
 	_count += cycles;
 
-	while (_count > 0) {
+	while (count > 0) {
 		int32 temp;
 		uint8 b1;
 
@@ -535,6 +568,8 @@ static void X6502_RunNormal(int32 cycles)
 void X6502_Run(int32 cycles)
 #endif
 {
+	unsigned int i;
+
 	#define RdRAM RdRAMFast
 	#define WrRAM WrRAMFast
 	#define RdMem RdMemNorm
@@ -552,6 +587,11 @@ void X6502_Run(int32 cycles)
 	#undef _PC
 	#define _PC pbackus
 
+
+	/* Return already if CPU is not running */
+	if (!X6502_running)
+		return;
+
 	if (PAL)
 		cycles *= 15;	/* 15*4=60 */
 	else
@@ -563,7 +603,7 @@ void X6502_Run(int32 cycles)
 		int32 temp;
 		uint8 b1;
 
-		if (_IRQlow) {
+		if (!X6502_stepping && _IRQlow) {
 			if (_IRQlow & FCEU_IQRESET) {
 				_PC = RdMem(0xFFFC);
 				_PC |= RdMem(0xFFFD) << 8;
@@ -598,8 +638,7 @@ void X6502_Run(int32 cycles)
 			_IRQlow &= ~(FCEU_IQTEMP);
 			if (_count <= 0) {
 				_PI = _P;
-				X.PC = pbackus;
-				return;
+				break;
 			}	/* Should increase accuracy without a
 				 * major speed hit.
 				 */
@@ -620,6 +659,23 @@ void X6502_Run(int32 cycles)
 		switch (b1) {
 			#include "ops.h"
 		}
+
+		/* Reset running flag and cycle count on step */
+		if (X6502_stepping) {
+			X6502_running = false;
+			_count = 0;
+		}
+
+		/* Stop running on breakpoint hit */
+		for (i = 0; i < MAX_BREAKPOINTS; i++)
+			if (_PC == breakpoints[i]) {
+				X6502_running = false;
+				_count = 0;
+			}
+
+		/* Break if requested */
+		if (!X6502_running)
+			break;
 	}
 
 	#undef _PC
