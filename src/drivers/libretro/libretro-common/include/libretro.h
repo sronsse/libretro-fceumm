@@ -967,6 +967,19 @@ enum retro_mod
                                             * core supports VFS before it starts handing out paths.
                                             * It is recomended to do so in retro_set_environment */
 
+#define RETRO_ENVIRONMENT_SET_CPU_CONTROL (47 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+                                           /* const struct retro_cpu_control * --
+                                            * This environment call lets a libretro core provide the ability
+                                            * for a frontend to control CPU execution (stepping, breakpoints,
+                                            * watchpoints, memory read/write, etc.).
+                                            * This can help implement a debugger for instance.
+                                            *
+                                            * Should only be used by emulators; it doesn't make much sense for
+                                            * anything else.
+                                            *
+                                            * Can be called from retro_init and retro_load_game.
+                                            */
+
 /* VFS functionality */
 
 /* File paths:
@@ -1324,6 +1337,65 @@ struct retro_memory_map
 {
    const struct retro_memory_descriptor *descriptors;
    unsigned num_descriptors;
+};
+
+/* CPU register structure */
+struct retro_cpu_reg {
+   const char *name;
+   unsigned int size;
+};
+
+/* CPU register access functions */
+typedef unsigned int (RETRO_CALLCONV *retro_cpu_get_reg_t)(const char *name);
+typedef void (RETRO_CALLCONV *retro_cpu_set_reg_t)(const char *name, unsigned int value);
+
+/* CPU execution control functions */
+typedef bool (RETRO_CALLCONV *retro_cpu_get_running_t)();
+typedef void (RETRO_CALLCONV *retro_cpu_set_running_t)(bool running);
+typedef void (RETRO_CALLCONV *retro_cpu_step_t)();
+typedef void (RETRO_CALLCONV *retro_cpu_reset_t)();
+
+/* Read/write byte/word/long functions based on specified address */
+typedef bool (RETRO_CALLCONV *retro_cpu_readb_t)(unsigned int addr, uint8_t *b);
+typedef bool (RETRO_CALLCONV *retro_cpu_readw_t)(unsigned int addr, uint16_t *w);
+typedef bool (RETRO_CALLCONV *retro_cpu_readl_t)(unsigned int addr, uint32_t *l);
+typedef bool (RETRO_CALLCONV *retro_cpu_writeb_t)(unsigned int addr, uint8_t b);
+typedef bool (RETRO_CALLCONV *retro_cpu_writew_t)(unsigned int addr, uint16_t w);
+typedef bool (RETRO_CALLCONV *retro_cpu_writel_t)(unsigned int addr, uint32_t l);
+
+/* Breakpoint/watchpoint functions */
+typedef void (RETRO_CALLCONV *retro_cpu_add_bp_t)(unsigned int addr);
+typedef void (RETRO_CALLCONV *retro_cpu_add_wp_t)(unsigned int addr);
+typedef void (RETRO_CALLCONV *retro_cpu_rem_bp_t)(unsigned int addr);
+typedef void (RETRO_CALLCONV *retro_cpu_rem_wp_t)(unsigned int addr);
+
+struct retro_cpu_control
+{
+   /* CPU registers */
+   const struct retro_cpu_reg *regs;
+   unsigned int num_regs;
+   retro_cpu_get_reg_t get_reg;
+   retro_cpu_set_reg_t set_reg;
+
+   /* CPU execution control */
+   retro_cpu_get_running_t get_running;
+   retro_cpu_set_running_t set_running;
+   retro_cpu_step_t step;
+   retro_cpu_reset_t reset;
+
+   /* Memory access functions */
+   retro_cpu_readb_t readb;
+   retro_cpu_readw_t readw;
+   retro_cpu_readl_t readl;
+   retro_cpu_writeb_t writeb;
+   retro_cpu_writew_t writew;
+   retro_cpu_writel_t writel;
+
+   /* Breakpoint/watchpoint functions */
+   retro_cpu_add_bp_t add_bp;
+   retro_cpu_add_wp_t add_wp;
+   retro_cpu_rem_bp_t rem_bp;
+   retro_cpu_rem_wp_t rem_wp;
 };
 
 struct retro_controller_description
