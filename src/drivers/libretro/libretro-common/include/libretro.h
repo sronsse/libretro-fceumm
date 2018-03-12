@@ -980,6 +980,16 @@ enum retro_mod
                                             * Can be called from retro_init and retro_load_game.
                                             */
 
+#define RETRO_ENVIRONMENT_SET_MEMORY_MAPS_NEW (48 | RETRO_ENVIRONMENT_EXPERIMENTAL)
+                                           /* const struct retro_memory_map_new * --
+                                            * This environment call lets a libretro core tell the frontend
+                                            * about the memory maps this core emulates.
+                                            * This can be used to implement, for example, cheats in a core-agnostic way.
+                                            *
+                                            * Should only be used by emulators; it doesn't make much sense for
+                                            * anything else.
+                                            */
+
 /* VFS functionality */
 
 /* File paths:
@@ -1337,6 +1347,20 @@ struct retro_memory_map
 {
    const struct retro_memory_descriptor *descriptors;
    unsigned num_descriptors;
+};
+
+struct retro_memory_descriptor_new
+{
+   const char *name;
+   size_t len;
+};
+
+struct retro_memory_map_new
+{
+   const struct retro_memory_descriptor_new *descriptors;
+   unsigned int num_descriptors;
+   size_t (*read)(unsigned int desc, void *ptr, size_t address, size_t len);
+   size_t (*write)(unsigned int desc, void *ptr, size_t address, size_t len);
 };
 
 /* CPU register structure */
