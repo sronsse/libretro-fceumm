@@ -1907,6 +1907,151 @@ void cpu_rem_wp(unsigned int addr)
       }
 }
 
+extern uint8 NTARAM[0x800], PALRAM[0x20], SPRAM[0x100], SPRBUF[0x100], UPALRAM[0x03];
+
+#define NUM_DESCRIPTORS_NEW	6
+#define WRAM_DESC		0
+#define SRAM_DESC		1
+#define PATTERN_DESC		2
+#define NAMETABLE_DESC		3
+#define PALETTE_DESC		4
+#define OAM_DESC		5
+struct retro_memory_descriptor_new descs_new[NUM_DESCRIPTORS_NEW] =
+{
+   { "wram", 2048 },
+   { "sram", 8192 },
+   { "pattern", 8192 },
+   { "nametable", 2048 },
+   { "palette", 32 },
+   { "oam", 256 }
+};
+
+size_t mem_read(unsigned int desc, void *ptr, size_t address, size_t len)
+{
+   uint8_t *dst = ptr;
+   uint8_t *src;
+   size_t num_bytes = 0;
+
+   /* Adapt address for SRAM access */
+   if (desc == SRAM_DESC)
+      address += 0x6000;
+
+   /* Read number of requested bytes */
+   while (num_bytes < len)
+   {
+      switch (desc)
+      {
+      case WRAM_DESC:
+      case SRAM_DESC:
+         if (address >> 10 >= 64)
+            return num_bytes;
+         src = MMapPtrs[address >> 10];
+         if (!src)
+            return num_bytes;
+         src += address & 0x3FF;
+         dst[num_bytes] = *src;
+         break;
+      case PATTERN_DESC:
+         if (address >= 8192)
+            return num_bytes;
+         dst[num_bytes] = VPage[address >> 10][address];
+         break;
+      case NAMETABLE_DESC:
+         if (address >= 2048)
+            return num_bytes;
+         dst[num_bytes] = vnapage[((address + 0x2000) >> 10) & 0x3][(address + 0x2000) & 0x3FF];
+         break;
+      case PALETTE_DESC:
+         if (address >= 32)
+            return num_bytes;
+         if (!(address & 3))
+         {
+            if (!(address & 0xC))
+               dst[num_bytes] = PALRAM[0x00];
+            else
+               dst[num_bytes] = UPALRAM[((address & 0xC) >> 2) - 1];
+         } else
+            dst[num_bytes] = PALRAM[address];
+         break;
+      case OAM_DESC:
+         dst[num_bytes] = SPRAM[address];
+         break;
+      default:
+         return num_bytes;
+      }
+
+      /* Increment address and number of read bytes */
+      address++;
+      num_bytes++;
+   }
+
+   /* Return number of bytes read */
+   return num_bytes;
+}
+
+size_t mem_write(unsigned int desc, void *ptr, size_t address, size_t len)
+{
+   uint8_t *src = ptr;
+   uint8_t *dst;
+   size_t num_bytes = 0;
+
+   /* Adapt address for SRAM access */
+   if (desc == SRAM_DESC)
+      address += 0x6000;
+
+    /* Read number of requested bytes */
+   while (num_bytes < len)
+   {
+      switch (desc)
+      {
+      case WRAM_DESC:
+      case SRAM_DESC:
+         if (address >> 10 >= 64)
+            return num_bytes;
+         dst = MMapPtrs[address >> 10];
+         if (!dst)
+            return num_bytes;
+         dst += address & 0x3FF;
+         *dst = src[num_bytes];
+         break;
+      case PATTERN_DESC:
+         if (address >= 8192)
+            return num_bytes;
+         VPage[address >> 10][address] = src[num_bytes];
+         break;
+      case NAMETABLE_DESC:
+         if (address >= 2048)
+            return num_bytes;
+         vnapage[((address + 0x2000) >> 10) & 0x3][(address + 0x2000) & 0x3FF] = src[num_bytes];
+         break;
+      case PALETTE_DESC:
+         if (address >= 32)
+            return num_bytes;
+         if (!(address & 3))
+         {
+            if (!(address & 0xC))
+               PALRAM[0x00] = src[num_bytes];
+            else
+               UPALRAM[((address & 0xC) >> 2) - 1] = src[num_bytes];
+         } else
+            PALRAM[address] = src[num_bytes];
+         break;
+      case OAM_DESC:
+         SPRAM[address] = src[num_bytes];
+         break;
+      default:
+         return num_bytes;
+      }
+
+      /* Increment address and number of written bytes */
+      address++;
+      num_bytes++;
+   }
+
+   /* Return number of bytes written */
+   return num_bytes;
+}
+
 bool retro_load_game(const struct retro_game_info *game)
 {
    unsigned i, j;
@@ -1969,6 +2114,7 @@ bool retro_load_game(const struct retro_game_info *game)
    struct retro_memory_descriptor descs[64];
    struct retro_memory_map        mmaps;
    struct retro_cpu_control       cpu_control;
+   struct retro_memory_map_new        mmaps_new;
 
    if (!game)
       return false;
@@ -2066,6 +2212,12 @@ bool retro_load_game(const struct retro_game_info *game)
    mmaps.descriptors = descs;
    mmaps.num_descriptors = i;
    environ_cb(RETRO_ENVIRONMENT_SET_MEMORY_MAPS, &mmaps);
+
+   mmaps_new.descriptors = descs_new;
+   mmaps_new.num_descriptors = NUM_DESCRIPTORS_NEW;
+   mmaps_new.read = mem_read;
+   mmaps_new.write = mem_write;
+   environ_cb(RETRO_ENVIRONMENT_SET_MEMORY_MAPS_NEW, &mmaps_new);
 
    /* Initialize breakpoints array */
    for (i = 0; i < MAX_BREAKPOINTS; i++)
